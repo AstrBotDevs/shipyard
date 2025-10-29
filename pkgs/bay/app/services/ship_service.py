@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 from app.config import settings
 from app.models import (
     Ship,
@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 class ShipService:
     """Service for managing Ship lifecycle and operations"""
 
+    def __init__(self):
+        # Track cleanup tasks for each ship to enable cancellation
+        self._cleanup_tasks: Dict[str, asyncio.Task] = {}
+
     async def create_ship(self, request: CreateShipRequest, session_id: str) -> Ship:
         """Create a new ship or reuse an existing one for the session"""
         # First, try to find an available ship that can accept this session
@@ -36,12 +40,24 @@ class ShipService:
                 await db_service.update_session_activity(session_id, available_ship.id)
                 return available_ship
             else:
-                # Add this session to the ship
+                # Add this session to the ship and extend TTL
                 session_ship = SessionShip(
                     session_id=session_id, ship_id=available_ship.id
                 )
                 await db_service.create_session_ship(session_ship)
                 await db_service.increment_ship_session_count(available_ship.id)
+
+                # Extend TTL by adding the new session's TTL to existing TTL
+                extended_ttl = available_ship.ttl + request.ttl
+                available_ship.ttl = extended_ttl
+                available_ship = await db_service.update_ship(available_ship)
+
+                # Reschedule cleanup with extended TTL
+                await self._schedule_cleanup(available_ship.id, extended_ttl)
+
+                logger.info(
+                    f"Session {session_id} joined ship {available_ship.id}, TTL extended to {extended_ttl}s"
+                )
                 return available_ship
 
         # No available ship found, create a new one
@@ -95,7 +111,7 @@ class ShipService:
             await db_service.increment_ship_session_count(ship.id)
 
             # Schedule TTL cleanup
-            asyncio.create_task(self._schedule_cleanup(ship.id, ship.ttl))
+            await self._schedule_cleanup(ship.id, ship.ttl)
 
             logger.info(f"Ship {ship.id} created successfully and is ready")
             return ship
@@ -115,6 +131,13 @@ class ShipService:
         ship = await db_service.get_ship(ship_id)
         if not ship:
             return False
+
+        # Cancel cleanup task if exists
+        if ship_id in self._cleanup_tasks:
+            task = self._cleanup_tasks[ship_id]
+            if not task.done():
+                task.cancel()
+            del self._cleanup_tasks[ship_id]
 
         # Stop container if exists
         if ship.container_id:
@@ -136,7 +159,7 @@ class ShipService:
         ship = await db_service.update_ship(ship)
 
         # Reschedule cleanup
-        asyncio.create_task(self._schedule_cleanup(ship_id, new_ttl))
+        await self._schedule_cleanup(ship_id, new_ttl)
 
         return ship
 
@@ -238,9 +261,23 @@ class ShipService:
 
     async def _schedule_cleanup(self, ship_id: str, ttl: int):
         """Schedule ship cleanup after TTL expires"""
-        await asyncio.sleep(ttl)
+        # Cancel any existing cleanup task for this ship
+        if ship_id in self._cleanup_tasks:
+            old_task = self._cleanup_tasks[ship_id]
+            if not old_task.done():
+                old_task.cancel()
+            del self._cleanup_tasks[ship_id]
 
+        # Create and store new cleanup task
+        task = asyncio.create_task(self._cleanup_ship_after_delay(ship_id, ttl))
+        self._cleanup_tasks[ship_id] = task
+        return task
+
+    async def _cleanup_ship_after_delay(self, ship_id: str, ttl: int):
+        """Perform ship cleanup after TTL delay"""
         try:
+            await asyncio.sleep(ttl)
+
             ship = await db_service.get_ship(ship_id)
             if ship and ship.status == 1:
                 # Mark as stopped
@@ -252,8 +289,15 @@ class ShipService:
                     await docker_service.stop_ship_container(ship.container_id)
 
                 logger.info(f"Ship {ship_id} cleaned up after TTL expiration")
+        except asyncio.CancelledError:
+            logger.info(f"Cleanup task for ship {ship_id} was cancelled")
+            raise
         except Exception as e:
             logger.error(f"Failed to cleanup ship {ship_id}: {e}")
+        finally:
+            # Remove task from tracking
+            if ship_id in self._cleanup_tasks:
+                del self._cleanup_tasks[ship_id]
 
     async def _forward_to_ship(
         self, ship_ip: str, request: ExecRequest, session_id: str
