@@ -1,5 +1,7 @@
 # Shipyard
 
+> Very early technical preview, lack of manpower, time :(
+
 ✨ 一个轻量级 Agent Sandbox 运行环境，支持多 Session 的 Sandbox 复用。支持 Python Interpreter、Shell、File System 等功能。✨ 
 
 ## 快速开始
