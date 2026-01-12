@@ -238,6 +238,7 @@ async def run_as_user(
 ) -> ProcessResult:
     """以指定用户身份运行命令"""
     try:
+        _ = await get_or_create_session_user(username)
         user_info = await UserManager.get_user_info(username)
         user_home = user_info["home_dir"]
 
@@ -252,8 +253,6 @@ async def run_as_user(
         if env:
             process_env.update(env)
 
-        # 准备工作目录
-        user_info = await UserManager.get_user_info(username)
         working_dir = Path(user_info["home_dir"]) / "workspace"
         if cwd:
             if not os.path.isabs(cwd):
