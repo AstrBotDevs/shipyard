@@ -210,3 +210,28 @@ class ShipyardClient:
                     raise Exception(
                         f"Failed to upload file: {response.status} {error_text}"
                     )
+
+    async def download_file(
+        self, ship_id: str, remote_file_path: str, session_id: str, local_file_path: str
+    ) -> None:
+        """Download file from ship container"""
+        session = await self._get_session()
+
+        headers = {"X-SESSION-ID": session_id}
+        params = {"file_path": remote_file_path}
+
+        async with session.get(
+            f"{self.endpoint_url}/ship/{ship_id}/download",
+            params=params,
+            headers=headers,
+        ) as response:
+            if response.status == 200:
+                # Write file content to local file
+                content = await response.read()
+                with open(local_file_path, "wb") as f:
+                    f.write(content)
+            else:
+                error_text = await response.text()
+                raise Exception(
+                    f"Failed to download file: {response.status} {error_text}"
+                )

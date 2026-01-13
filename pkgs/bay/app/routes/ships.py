@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header, UploadFile, Form
+from fastapi.responses import Response
 from app.models import (
     CreateShipRequest,
     ShipResponse,
@@ -156,4 +157,49 @@ async def upload_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"File upload failed: {str(e)}",
+        )
+
+
+@router.get("/ship/{ship_id}/download")
+async def download_file(
+    ship_id: str,
+    file_path: str,
+    token: str = Depends(verify_token),
+    x_session_id: str = Header(..., alias="X-SESSION-ID"),
+):
+    """Download file from ship container"""
+    try:
+        success, file_content, error = await ship_service.download_file(
+            ship_id, file_path, x_session_id
+        )
+
+        if not success:
+            if "not found" in error.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=error
+                )
+            elif "access" in error.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail=error
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=error
+                )
+
+        # Extract filename from file_path
+        filename = file_path.split("/")[-1] if "/" in file_path else file_path
+
+        return Response(
+            content=file_content,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"File download failed: {str(e)}",
         )

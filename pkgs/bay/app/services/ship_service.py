@@ -274,6 +274,40 @@ class ShipService:
 
         return result
 
+    async def download_file(
+        self, ship_id: str, file_path: str, session_id: str
+    ) -> tuple[bool, bytes, str]:
+        """Download file from ship container
+        
+        Returns:
+            tuple: (success, file_content, error_message)
+        """
+        ship = await db_service.get_ship(ship_id)
+        if not ship or ship.status == 0:
+            return (False, b"", "Ship not found or not running")
+
+        if not ship.ip_address:
+            return (False, b"", "Ship IP address not available")
+
+        # Verify that this session has access to this ship
+        session_ship = await db_service.get_session_ship(session_id, ship_id)
+        if not session_ship:
+            return (False, b"", "Session does not have access to this ship")
+
+        # Update last activity for this session
+        await db_service.update_session_activity(session_id, ship_id)
+
+        # Forward file download request to ship container
+        success, file_content, error = await self._download_file_from_ship(
+            ship.ip_address, file_path, session_id
+        )
+
+        # Extend TTL after successful download
+        if success:
+            await self._extend_ttl_after_operation(ship_id)
+
+        return (success, file_content, error)
+
     async def _extend_ttl_after_operation(self, ship_id: str):
         """Extend ship TTL after an operation"""
         from datetime import datetime, timezone
@@ -517,6 +551,41 @@ class ShipService:
                 error=f"Internal error: {str(e)}",
                 message="File upload failed",
             )
+
+    async def _download_file_from_ship(
+        self, ship_ip: str, file_path: str, session_id: str
+    ) -> tuple[bool, bytes, str]:
+        """Download file from ship container via HTTP API
+        
+        Returns:
+            tuple: (success, file_content, error_message)
+        """
+        url = f"http://{ship_ip}:8123/download"
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=120)  # 2 minutes for file download
+            headers = {"X-SESSION-ID": session_id}
+            params = {"file_path": file_path}
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    url, params=params, headers=headers
+                ) as response:
+                    if response.status == 200:
+                        file_content = await response.read()
+                        return (True, file_content, "")
+                    else:
+                        error_text = await response.text()
+                        return (False, b"", f"Ship returned {response.status}: {error_text}")
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Failed to download file from ship {ship_ip}: {e}")
+            return (False, b"", f"Connection error: {str(e)}")
+        except asyncio.TimeoutError:
+            return (False, b"", "File download timeout")
+        except Exception as e:
+            logger.error(f"Unexpected error downloading file from ship {ship_ip}: {e}")
+            return (False, b"", f"Internal error: {str(e)}")
 
 
 # Global ship service instance

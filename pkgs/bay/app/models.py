@@ -118,3 +118,9 @@ class UploadFileResponse(BaseModel):
     message: str
     file_path: Optional[str] = None
     error: Optional[str] = None
+
+
+class DownloadFileResponse(BaseModel):
+    success: bool
+    message: str
+    error: Optional[str] = None

@@ -54,3 +54,20 @@ class SessionShip(ShipInfo):
         return await self._client.upload_file(
             self.id, file_path, self._session_id, remote_file_path
         )
+
+    async def download_file(
+        self, remote_file_path: str, local_file_path: str | None = None
+    ) -> None:
+        """Download file from this ship session
+
+        Args:
+            remote_file_path: Path to the file in the ship workspace to download
+            local_file_path: Path where the file should be saved locally.
+                           If not provided, uses the basename of remote_file_path.
+        """
+        if not local_file_path:
+            local_file_path = os.path.basename(remote_file_path)
+
+        await self._client.download_file(
+            self.id, remote_file_path, self._session_id, local_file_path
+        )

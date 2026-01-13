@@ -182,3 +182,5 @@ data/
 # Logs
 *.log
 logs/
+
+pkgs/bay/ship_data/
