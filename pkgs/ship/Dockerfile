@@ -1,54 +1,66 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS builder
 
 # 设置工作目录
 WORKDIR /app
 
-RUN apt update && apt install -y --no-install-recommends \
-    # 编译工具
+# 安装构建依赖（临时）
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     musl-dev \
     python3-dev \
     libffi-dev \
-    unzip \
-    git \
-    curl \
-    # 图像处理和压缩库（用于 Pillow / OpenCV headless）
     libpng-dev \
     libjpeg-dev \
-    libglib2.0-0 \
-    # lxml 依赖
     libxml2-dev \
     libxslt1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制依赖文件并安装Python依赖
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ===== 最终镜像 =====
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# 只安装运行时必需的依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # 图像处理运行时库（Pillow / OpenCV headless）
+    libpng16-16 \
+    libjpeg62-turbo \
+    libglib2.0-0 \
+    # lxml 运行时库
+    libxml2 \
+    libxslt1.1 \
     # 字体显示
     fontconfig \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
-    fonts-wqy-zenhei \
-    fonts-wqy-microhei \
     # 网络工具
     net-tools \
     # 用户管理工具
     sudo \
     passwd \
     adduser \
+    # Node.js 安装需要的工具
+    curl \
+    gnupg \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 从builder阶段复制Python包
+COPY --from=builder /install /usr/local
+
+# 安装 Node.js (LTS)
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
-    && apt clean
+    && npm install -g pnpm vercel \
+    && npm cache clean --force
 
-# 复制依赖文件
-COPY requirements.txt .
-
-# 安装Python依赖
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 安装 Node.js
-RUN apt-get update && apt-get install -y curl gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g pnpm && npm install -g vercel
-
+# 配置sudo
 RUN echo "root ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
     echo "Defaults:root !requiretty" >> /etc/sudoers && \
     groupadd -g 9999 shipyard_users || true

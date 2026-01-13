@@ -60,58 +60,20 @@ async def _set_kernel_working_directory(km: AsyncKernelManager, working_dir: str
     kc = km.client()
     try:
         # 执行初始化代码，包括中文字体配置
-        init_code = f"""
-import os
-os.chdir(r'{working_dir}')
+        init_code = """
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import shutil, os
 
-# 配置中文字体支持
-try:
-    import matplotlib.pyplot as plt
-    import matplotlib.font_manager as fm
-    
-    # 直接指定中文字体路径
-    chinese_font_paths = [
-        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
-        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc'
-    ]
-    
-    # 尝试添加中文字体
-    font_configured = False
-    for font_path in chinese_font_paths:
-        try:
-            import os
-            if os.path.exists(font_path):
-                # 添加字体到matplotlib
-                fm.fontManager.addfont(font_path)
-                # 获取字体名称
-                font_prop = fm.FontProperties(fname=font_path)
-                font_name = font_prop.get_name()
-                
-                # 配置matplotlib使用该字体
-                plt.rcParams['font.sans-serif'] = [font_name, 'DejaVu Sans']
-                plt.rcParams['axes.unicode_minus'] = False
-                plt.rcParams['font.family'] = 'sans-serif'
-                
-                print(f"Chinese font configured: {{font_name}} from {{font_path}}")
-                font_configured = True
-                break
-        except Exception as font_err:
-            print(f"Failed to load font {{font_path}}: {{font_err}}")
-            continue
-    
-    if not font_configured:
-        # 回退到默认配置
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
-        plt.rcParams['axes.unicode_minus'] = False
-        print("Using default font configuration")
-        
-except ImportError:
-    print("matplotlib not available")
-except Exception as e:
-    print(f"Font configuration error: {{e}}")
+cache_dir = os.path.expanduser("~/.cache/matplotlib")
+if os.path.exists(cache_dir):
+    shutil.rmtree(cache_dir)
 
-print(f"Working directory changed to: {{os.getcwd()}}")
+font_path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+font_prop = fm.FontProperties(fname=font_path, index=2)
+
+plt.rcParams['font.family'] = font_prop.get_name()
+plt.rcParams['axes.unicode_minus'] = False
 """
         kc.execute(init_code, silent=True, store_history=False)
 
