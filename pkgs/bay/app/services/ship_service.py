@@ -30,9 +30,11 @@ class ShipService:
         stopped_ship = await db_service.find_stopped_ship_for_session(session_id)
         if stopped_ship and docker_service.ship_data_exists(stopped_ship.id):
             # Restore the stopped ship
-            logger.info(f"Restoring stopped ship {stopped_ship.id} for session {session_id}")
+            logger.info(
+                f"Restoring stopped ship {stopped_ship.id} for session {session_id}"
+            )
             return await self._restore_ship(stopped_ship, request, session_id)
-        
+
         # Second, try to find an available ship that can accept this session
         available_ship = await db_service.find_available_ship(session_id)
 
@@ -193,11 +195,11 @@ class ShipService:
 
         # Forward request to ship container
         result = await self._forward_to_ship(ship.ip_address, request, session_id)
-        
+
         # Extend TTL after successful operation
         if result.success:
             await self._extend_ttl_after_operation(ship_id)
-        
+
         return result
 
     async def get_logs(self, ship_id: str) -> str:
@@ -255,29 +257,29 @@ class ShipService:
         result = await self._upload_file_to_ship(
             ship.ip_address, file_content, file_path, session_id
         )
-        
+
         # Extend TTL after successful upload
         if result.success:
             await self._extend_ttl_after_operation(ship_id)
-        
+
         return result
 
     async def _extend_ttl_after_operation(self, ship_id: str):
         """Extend ship TTL after an operation"""
         from datetime import datetime, timezone
-        
+
         ship = await db_service.get_ship(ship_id)
         if not ship or ship.status == 0:
             return
-        
+
         # Calculate new TTL: extend_ttl_after_ops seconds from now
         new_ttl = settings.extend_ttl_after_ops
         ship.ttl = new_ttl
         await db_service.update_ship(ship)
-        
+
         # Reschedule cleanup with new TTL
         await self._schedule_cleanup(ship_id, new_ttl)
-        
+
         logger.info(f"Ship {ship_id} TTL extended to {new_ttl}s after operation")
 
     async def _wait_for_available_slot(self):
@@ -378,7 +380,9 @@ class ShipService:
             # Schedule TTL cleanup
             await self._schedule_cleanup(ship.id, ship.ttl)
 
-            logger.info(f"Ship {ship.id} restored successfully for session {session_id}")
+            logger.info(
+                f"Ship {ship.id} restored successfully for session {session_id}"
+            )
             return ship
 
         except Exception as e:
@@ -471,10 +475,11 @@ class ShipService:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, data=data, headers=headers) as response:
                     if response.status == 200:
+                        resp = await response.json()
                         return UploadFileResponse(
                             success=True,
                             message="File uploaded successfully",
-                            file_path=file_path,
+                            file_path=resp.get("file_path", "unknown"),
                         )
                     else:
                         error_text = await response.text()

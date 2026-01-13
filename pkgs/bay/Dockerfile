@@ -11,19 +11,14 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml ./
+# Copy all project files
+COPY pyproject.toml requirements.txt alembic.ini run.py ./
 COPY app/ ./app/
 COPY alembic/ ./alembic/
-COPY alembic.ini ./
-COPY run.py ./
-COPY requirements.txt ./
 
-# Install Python dependencies
-RUN pip install -r requirements.txt --no-cache-dir
-
-# Create data directory for SQLite
-RUN mkdir -p /app/data
+# Install dependencies and create data directory in one layer
+RUN pip install -r requirements.txt --no-cache-dir && \
+    mkdir -p /app/data
 
 # Expose port
 EXPOSE 8000

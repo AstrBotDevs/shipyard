@@ -4,7 +4,7 @@ services:
   shipyard:
     image: soulter/shipyard-bay:latest
     ports:
-      - "8000:8000"
+      - "8156:8000"
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/bay.db
       - ACCESS_TOKEN=secret-token
