@@ -26,6 +26,7 @@ dependencies = [
     "python-pptx>=1.0.2",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
+    "tomli>=2.0.0",
     "uvicorn>=0.37.0",
     "xlrd>=2.0.2",
 ]

@@ -6,6 +6,8 @@ from .components.shell import router as shell_router
 from .components.upload import router as upload_router
 from .components.user_manager import UserManager
 import logging
+import tomli
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +44,25 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+def get_version() -> str:
+    """Get version from pyproject.toml"""
+    try:
+        pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
+        with open(pyproject_path, "rb") as f:
+            data = tomli.load(f)
+        return data.get("project", {}).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+
+@app.get("/stat")
+async def get_stat():
+    """Get service statistics and version information"""
+    return {
+        "service": "ship",
+        "version": get_version(),
+        "status": "running",
+        "author": "AstrBot Team"
+    }

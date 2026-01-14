@@ -17,6 +17,7 @@ dependencies = [
     "alembic",
     "greenlet>=3.2.4",
     "python-multipart>=0.0.20",
+    "tomli>=2.0.0",
 ]
 
 [project.optional-dependencies]

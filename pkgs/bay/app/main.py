@@ -5,7 +5,7 @@ import logging
 from app.config import settings
 from app.database import db_service
 from app.services.docker_service import docker_service
-from app.routes import health, ships
+from app.routes import health, ships, stat
 
 # Configure logging
 logging.basicConfig(
@@ -72,6 +72,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(health.router, tags=["health"])
     app.include_router(ships.router, tags=["ships"])
+    app.include_router(stat.router, tags=["stat"])
 
     return app
 
