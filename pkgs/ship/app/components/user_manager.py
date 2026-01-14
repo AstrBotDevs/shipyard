@@ -441,19 +441,31 @@ async def run_as_user(
                 )
 
         # 使用 sudo 切换用户执行命令
-        sudo_command = f"sudo -u {username} -H bash -c 'cd {working_dir} && {command}'"
+        # sudo_command = f"sudo -u {username} -H bash -c 'cd {working_dir} && {command}'"
 
         if shell:
-            process = await asyncio.create_subprocess_shell(
-                sudo_command,
+            process = await asyncio.create_subprocess_exec(
+                "sudo",
+                "-u",
+                username,
+                "-H",
+                "bash",
+                "-lc",
+                f"cd {shlex.quote(str(working_dir))} && {command}",
                 env=process_env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
         else:
+            args = shlex.split(command)
             process = await asyncio.create_subprocess_exec(
-                *shlex.split(sudo_command),
+                "sudo",
+                "-u",
+                username,
+                "-H",
+                *args,
                 env=process_env,
+                cwd=str(working_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
