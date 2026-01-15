@@ -159,6 +159,17 @@ class DatabaseService:
         finally:
             await session.close()
 
+    async def update_session_ship(self, session_ship: SessionShip) -> SessionShip:
+        """Update session-ship relationship"""
+        session = self.get_session()
+        try:
+            session.add(session_ship)
+            await session.commit()
+            await session.refresh(session_ship)
+            return session_ship
+        finally:
+            await session.close()
+
     async def find_available_ship(self, session_id: str) -> Optional[Ship]:
         """Find an available ship that can accept a new session"""
         session = self.get_session()

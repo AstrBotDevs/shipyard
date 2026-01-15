@@ -175,13 +175,9 @@ async def download_file(
 
         if not success:
             if "not found" in error.lower():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail=error
-                )
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error)
             elif "access" in error.lower():
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail=error
-                )
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error)
             else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, detail=error

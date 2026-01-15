@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import logging
 from typing import Optional, List, Dict
+from datetime import datetime, timedelta, timezone
 from app.config import settings
 from app.models import (
     Ship,
@@ -63,8 +64,11 @@ class ShipService:
 
         if available_ship:
             # Verify that the container actually exists and is running
-            if not available_ship.container_id or not await docker_service.is_container_running(
-                available_ship.container_id
+            if (
+                not available_ship.container_id
+                or not await docker_service.is_container_running(
+                    available_ship.container_id
+                )
             ):
                 # Container doesn't exist or isn't running, mark ship as stopped
                 logger.warning(
@@ -86,23 +90,24 @@ class ShipService:
                 await db_service.update_session_activity(session_id, available_ship.id)
                 return available_ship
             else:
-                # Add this session to the ship and extend TTL
+                # Calculate expiration time for this session
+                expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.ttl)
+
+                # Add this session to the ship
                 session_ship = SessionShip(
-                    session_id=session_id, ship_id=available_ship.id
+                    session_id=session_id,
+                    ship_id=available_ship.id,
+                    expires_at=expires_at,
+                    initial_ttl=request.ttl,
                 )
                 await db_service.create_session_ship(session_ship)
                 await db_service.increment_ship_session_count(available_ship.id)
 
-                # Extend TTL by adding the new session's TTL to existing TTL
-                extended_ttl = available_ship.ttl + request.ttl
-                available_ship.ttl = extended_ttl
-                available_ship = await db_service.update_ship(available_ship)
-
-                # Reschedule cleanup with extended TTL
-                await self._schedule_cleanup(available_ship.id, extended_ttl)
+                # Recalculate ship's TTL based on all sessions' expiration times
+                await self._recalculate_and_schedule_cleanup(available_ship.id)
 
                 logger.info(
-                    f"Session {session_id} joined ship {available_ship.id}, TTL extended to {extended_ttl}s"
+                    f"Session {session_id} joined ship {available_ship.id}, expires at {expires_at}"
                 )
                 return available_ship
 
@@ -129,7 +134,6 @@ class ShipService:
             # Update ship with container info
             ship.container_id = container_info["container_id"]
             ship.ip_address = container_info["ip_address"]
-            ship.current_session_num = 1  # First session
             ship = await db_service.update_ship(ship)
 
             # Wait for ship to be ready
@@ -152,7 +156,13 @@ class ShipService:
                 )
 
             # Create session-ship relationship
-            session_ship = SessionShip(session_id=session_id, ship_id=ship.id)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.ttl)
+            session_ship = SessionShip(
+                session_id=session_id,
+                ship_id=ship.id,
+                expires_at=expires_at,
+                initial_ttl=request.ttl,
+            )
             await db_service.create_session_ship(session_ship)
             await db_service.increment_ship_session_count(ship.id)
 
@@ -235,7 +245,7 @@ class ShipService:
 
         # Extend TTL after successful operation
         if result.success:
-            await self._extend_ttl_after_operation(ship_id)
+            await self._extend_ttl_after_operation(ship_id, session_id)
 
         return result
 
@@ -297,7 +307,7 @@ class ShipService:
 
         # Extend TTL after successful upload
         if result.success:
-            await self._extend_ttl_after_operation(ship_id)
+            await self._extend_ttl_after_operation(ship_id, session_id)
 
         return result
 
@@ -305,7 +315,7 @@ class ShipService:
         self, ship_id: str, file_path: str, session_id: str
     ) -> tuple[bool, bytes, str]:
         """Download file from ship container
-        
+
         Returns:
             tuple: (success, file_content, error_message)
         """
@@ -331,25 +341,64 @@ class ShipService:
 
         # Extend TTL after successful download
         if success:
-            await self._extend_ttl_after_operation(ship_id)
+            await self._extend_ttl_after_operation(ship_id, session_id)
 
         return (success, file_content, error)
 
-    async def _extend_ttl_after_operation(self, ship_id: str):
-        """Extend ship TTL after an operation"""
-        ship = await db_service.get_ship(ship_id)
-        if not ship or ship.status == 0:
+    async def _extend_ttl_after_operation(self, ship_id: str, session_id: str):
+        """Extend ship TTL after an operation by refreshing the current session's expiration time"""
+        # Get the session information
+        session_ship = await db_service.get_session_ship(session_id, ship_id)
+        if not session_ship:
+            logger.warning(f"Session {session_id} not found for ship {ship_id}")
             return
 
-        # Calculate new TTL: extend_ttl_after_ops seconds from now
-        new_ttl = settings.extend_ttl_after_ops
-        ship.ttl = new_ttl
-        await db_service.update_ship(ship)
+        # Refresh this session's expiration time using its initial TTL
+        new_expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=session_ship.initial_ttl
+        )
+        session_ship.expires_at = new_expires_at
+        await db_service.update_session_ship(session_ship)
 
-        # Reschedule cleanup with new TTL
-        await self._schedule_cleanup(ship_id, new_ttl)
+        # Recalculate ship's cleanup time based on all sessions
+        await self._recalculate_and_schedule_cleanup(ship_id)
 
-        logger.info(f"Ship {ship_id} TTL extended to {new_ttl}s after operation")
+        logger.info(
+            f"Session {session_id} TTL refreshed for ship {ship_id}, new expires_at: {new_expires_at}"
+        )
+
+    async def _recalculate_and_schedule_cleanup(self, ship_id: str):
+        """Recalculate ship's TTL based on all sessions' expiration times and reschedule cleanup"""
+        # Get all sessions for this ship
+        all_sessions = await db_service.get_sessions_for_ship(ship_id)
+
+        if not all_sessions:
+            logger.warning(f"No sessions found for ship {ship_id}")
+            return
+
+        # Find the maximum expiration time among all sessions
+        max_expires_at = max(s.expires_at for s in all_sessions)
+
+        # Calculate remaining time until expiration
+        now = datetime.now(timezone.utc)
+        remaining_seconds = (max_expires_at - now).total_seconds()
+
+        # Make sure remaining_seconds is not negative
+        if remaining_seconds < 0:
+            remaining_seconds = 0
+
+        # Update ship's TTL in database for reference
+        ship = await db_service.get_ship(ship_id)
+        if ship:
+            ship.ttl = int(remaining_seconds)
+            await db_service.update_ship(ship)
+
+        # Reschedule cleanup
+        await self._schedule_cleanup(ship_id, int(remaining_seconds))
+
+        logger.info(
+            f"Ship {ship_id} TTL recalculated: {remaining_seconds}s (expires at {max_expires_at})"
+        )
 
     async def _wait_for_available_slot(self):
         """Wait for an available ship slot"""
@@ -446,8 +495,19 @@ class ShipService:
             # Update last activity for this session
             await db_service.update_session_activity(session_id, ship.id)
 
-            # Schedule TTL cleanup
-            await self._schedule_cleanup(ship.id, ship.ttl)
+            # Get the session_ship to refresh its expiration time
+            session_ship = await db_service.get_session_ship(session_id, ship.id)
+            if session_ship:
+                # Refresh this session's expiration time with new TTL
+                new_expires_at = datetime.now(timezone.utc) + timedelta(
+                    seconds=request.ttl
+                )
+                session_ship.expires_at = new_expires_at
+                session_ship.initial_ttl = request.ttl
+                await db_service.update_session_ship(session_ship)
+
+            # Recalculate and schedule TTL cleanup
+            await self._recalculate_and_schedule_cleanup(ship.id)
 
             logger.info(
                 f"Ship {ship.id} restored successfully for session {session_id}"
@@ -581,7 +641,7 @@ class ShipService:
         self, ship_ip: str, file_path: str, session_id: str
     ) -> tuple[bool, bytes, str]:
         """Download file from ship container via HTTP API
-        
+
         Returns:
             tuple: (success, file_content, error_message)
         """
@@ -593,15 +653,17 @@ class ShipService:
             params = {"file_path": file_path}
 
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    url, params=params, headers=headers
-                ) as response:
+                async with session.get(url, params=params, headers=headers) as response:
                     if response.status == 200:
                         file_content = await response.read()
                         return (True, file_content, "")
                     else:
                         error_text = await response.text()
-                        return (False, b"", f"Ship returned {response.status}: {error_text}")
+                        return (
+                            False,
+                            b"",
+                            f"Ship returned {response.status}: {error_text}",
+                        )
 
         except aiohttp.ClientError as e:
             logger.error(f"Failed to download file from ship {ship_ip}: {e}")
