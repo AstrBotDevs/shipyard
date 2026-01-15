@@ -39,9 +39,6 @@ class Settings(BaseSettings):
     default_ship_memory: str = Field(
         default="512m", description="Default ship memory allocation"
     )
-    extend_ttl_after_ops: int = Field(
-        default=600, description="Extend TTL by this many seconds after any operation"
-    )
 
     # Ship health check settings
     ship_health_check_timeout: int = Field(

@@ -4,24 +4,25 @@ services:
   shipyard:
     image: soulter/shipyard-bay:latest
     ports:
-      - "8156:8000"
+      - "8156:8156"
     environment:
+      - PORT=8156
       - DATABASE_URL=sqlite+aiosqlite:///./data/bay.db
       - ACCESS_TOKEN=secret-token
       - MAX_SHIP_NUM=10
       - BEHAVIOR_AFTER_MAX_SHIP=reject
       - DOCKER_IMAGE=soulter/shipyard-ship:latest
-      - DOCKER_NETWORK=bay_shipyard
-      - SHIP_DATA_DIR=${PWD}/ship_data
+      - DOCKER_NETWORK=shipyard_network
+      - SHIP_DATA_DIR=${PWD}/data/shipyard/ship_mnt_data
+      - DEFAULT_SHIP_CPUS=1.0
+      - DEFAULT_SHIP_MEMORY=512m
     volumes:
-      - bay_data:/app/data
+      - ${PWD}/data/shipyard/bay_data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - shipyard
 
-volumes:
-  bay_data:
-
 networks:
   shipyard:
+    name: shipyard_network
     driver: bridge
