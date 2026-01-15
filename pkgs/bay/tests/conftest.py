@@ -54,7 +54,7 @@ def bay_server(docker_client, bay_image):
 
     container = docker_client.containers.run(
         bay_image.id,
-        ports={"8000/tcp": ("127.0.0.1", 0)},  # 随机端口映射
+        ports={"8156/tcp": ("127.0.0.1", 0)},  # 随机端口映射
         environment=environment,
         detach=True,
         auto_remove=True,
@@ -66,7 +66,7 @@ def bay_server(docker_client, bay_image):
 
     # 获取映射的端口
     container.reload()
-    port_mapping = container.attrs["NetworkSettings"]["Ports"]["8000/tcp"]
+    port_mapping = container.attrs["NetworkSettings"]["Ports"]["8156/tcp"]
     if not port_mapping:
         raise RuntimeError("Failed to get port mapping")
 

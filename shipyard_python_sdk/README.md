@@ -17,7 +17,7 @@ from shipyard_python_sdk import ShipyardClient, Spec, create_session_ship
 async def main():
     # Option 1: Using client directly
     client = ShipyardClient(
-        endpoint_url="http://localhost:8000",
+        endpoint_url="http://localhost:8156",
         access_token="your-token"
     )
     

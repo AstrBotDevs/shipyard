@@ -21,7 +21,7 @@ RUN pip install -r requirements.txt --no-cache-dir && \
     mkdir -p /app/data
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8156
 
 # Start the application
 CMD ["python", "run.py"]
