@@ -180,7 +180,11 @@ class ShipService:
 
     async def get_ship(self, ship_id: str) -> Optional[Ship]:
         """Get ship by ID"""
-        return await db_service.get_ship(ship_id)
+        ship = await db_service.get_ship(ship_id)
+        if ship:
+            # Calculate and set the actual expiration time based on all sessions
+            await self._set_ship_expires_at(ship)
+        return ship
 
     async def delete_ship(self, ship_id: str) -> bool:
         """Delete ship"""
@@ -259,7 +263,11 @@ class ShipService:
 
     async def list_active_ships(self) -> List[Ship]:
         """List all active ships"""
-        return await db_service.list_active_ships()
+        ships = await db_service.list_active_ships()
+        # Calculate and set the actual expiration time for each ship
+        for ship in ships:
+            await self._set_ship_expires_at(ship)
+        return ships
 
     async def upload_file(
         self, ship_id: str, file_content: bytes, file_path: str, session_id: str
@@ -379,6 +387,10 @@ class ShipService:
         # Find the maximum expiration time among all sessions
         max_expires_at = max(s.expires_at for s in all_sessions)
 
+        # Ensure max_expires_at is timezone-aware
+        if max_expires_at.tzinfo is None:
+            max_expires_at = max_expires_at.replace(tzinfo=timezone.utc)
+
         # Calculate remaining time until expiration
         now = datetime.now(timezone.utc)
         remaining_seconds = (max_expires_at - now).total_seconds()
@@ -399,6 +411,30 @@ class ShipService:
         logger.info(
             f"Ship {ship_id} TTL recalculated: {remaining_seconds}s (expires at {max_expires_at})"
         )
+
+    async def _set_ship_expires_at(self, ship: Ship):
+        """Calculate and set ship's expiration time based on all sessions"""
+        if ship.status == 0:
+            # Stopped ships don't have an expiration time
+            ship.expires_at = None
+            return
+
+        # Get all sessions for this ship
+        all_sessions = await db_service.get_sessions_for_ship(ship.id)
+
+        if not all_sessions:
+            # No sessions, ship expires immediately (or already expired)
+            ship.expires_at = None
+            return
+
+        # Find the maximum expiration time among all sessions
+        max_expires_at = max(s.expires_at for s in all_sessions)
+
+        # Ensure max_expires_at is timezone-aware
+        if max_expires_at.tzinfo is None:
+            max_expires_at = max_expires_at.replace(tzinfo=timezone.utc)
+
+        ship.expires_at = max_expires_at
 
     async def _wait_for_available_slot(self):
         """Wait for an available ship slot"""

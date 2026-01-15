@@ -26,6 +26,11 @@ class ShipBase(SQLModel):
     current_session_num: int = Field(
         default=0, description="Current number of active sessions"
     )
+    expires_at: Optional[datetime] = Field(
+        default=None,
+        description="When this ship will expire based on all sessions",
+        sa_column=None,  # Not stored in database, calculated dynamically
+    )
 
 
 class Ship(ShipBase, table=True):
@@ -90,6 +95,9 @@ class ShipResponse(BaseModel):
     ttl: int
     max_session_num: int
     current_session_num: int
+    expires_at: Optional[datetime] = Field(
+        None, description="When this ship will expire based on all sessions"
+    )
 
 
 class ExecRequest(BaseModel):
