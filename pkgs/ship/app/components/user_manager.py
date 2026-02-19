@@ -307,6 +307,8 @@ class UserManager:
         home_path.mkdir(parents=True, exist_ok=True)
         workspace_dir = home_path / "workspace"
         workspace_dir.mkdir(exist_ok=True)
+        workspace_skills_dir = workspace_dir / "skills"
+        repo_skills_dir = Path(__file__).resolve().parents[2] / "skills"
 
         # 获取用户信息
         user_info = pwd.getpwnam(username)
@@ -318,6 +320,48 @@ class UserManager:
         shutil.chown(workspace_dir, user=user_id, group=group_id)
         os.chmod(home_path, 0o755)
         os.chmod(workspace_dir, 0o755)
+
+        # 在用户工作区里暴露内置 skills：逐个技能目录创建符号链接。
+        if repo_skills_dir.exists():
+            if workspace_skills_dir.is_symlink():
+                workspace_skills_dir.unlink()
+
+            if workspace_skills_dir.exists() and not workspace_skills_dir.is_dir():
+                logger.warning(
+                    "Skip creating skill symlinks for user %s: %s exists and is not a directory",
+                    username,
+                    workspace_skills_dir,
+                )
+            else:
+                workspace_skills_dir.mkdir(exist_ok=True)
+                shutil.chown(workspace_skills_dir, user=user_id, group=group_id)
+                os.chmod(workspace_skills_dir, 0o755)
+
+                for skill_path in repo_skills_dir.iterdir():
+                    if not skill_path.is_dir():
+                        continue
+
+                    user_skill_link = workspace_skills_dir / skill_path.name
+                    if user_skill_link.exists() or user_skill_link.is_symlink():
+                        if user_skill_link.is_symlink():
+                            linked_target = user_skill_link.resolve(strict=False)
+                            if linked_target != skill_path.resolve():
+                                user_skill_link.unlink()
+                                user_skill_link.symlink_to(
+                                    skill_path, target_is_directory=True
+                                )
+                        else:
+                            logger.warning(
+                                "Skip skill symlink for user %s: %s exists and is not a symlink",
+                                username,
+                                user_skill_link,
+                            )
+                    else:
+                        user_skill_link.symlink_to(
+                            skill_path, target_is_directory=True
+                        )
+        else:
+            logger.warning("Built-in skills directory not found: %s", repo_skills_dir)
 
         # 创建基本的shell配置文件
         bashrc_path = home_path / ".bashrc"
